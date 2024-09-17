@@ -1,7 +1,6 @@
 import tkinter as tk
 from tkinter import ttk
 from tkcalendar import DateEntry
-import pandas as pd
 import os
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
