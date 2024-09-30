@@ -2,42 +2,48 @@ import tkinter as tk
 from tkinter import ttk
 from tkcalendar import DateEntry
 import os
-from reportlab.lib.pagesizes import A4
-from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib import colors
-from reportlab.lib.pagesizes import letter
-from reportlab.lib.units import inch
-from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
+from reportlab.lib.styles import getSampleStyleSheet 
 from datetime import datetime
 
 # Name der CSV-Datei, in der die Einträge gespeichert werden
 FILE_NAME = "kassenbuch.csv"
 
 # Funktion zum Hinzufügen eines Eintrags und Speichern in CSV
-def add_entry(date_entry, desc_entry, netto_entry, mwst_entry, brutto_entry, listbox, total_label):
+def add_entry(date_entry, desc_entry, category_entry, zahlung_entry, netto_entry, mwst_entry, mwst_satz_entry, brutto_entry, listbox, total_label):
     date_value = date_entry.get()
     desc_value = desc_entry.get()
+    category_value = category_entry.get()
+    zahlung_value = zahlung_entry.get()
     netto_value = netto_entry.get()
     mwst_value = mwst_entry.get()
+    mwst_satz_value = mwst_satz_entry.get()
     brutto_value = brutto_entry.get()
 
-    if date_value and desc_value and netto_value and mwst_value and brutto_value:
+    if date_value and desc_value and category_value and zahlung_value and netto_value and mwst_value and mwst_satz_value and brutto_value:
         try:
             brutto_value_float = float(brutto_value)
         except ValueError:
             print("Fehler: Brutto Betrag muss eine Zahl sein.")
             return
 
-        entry = f"{date_value}, {desc_value}, {netto_value}, {mwst_value}, {brutto_value}"
+        # MwSt.-Betrag und MwSt.-Satz getrennt speichern
+        entry = f"{date_value}, {desc_value}, {category_value}, {zahlung_value}, {netto_value}, {mwst_value}, {mwst_satz_value}, {brutto_value}"
         listbox.insert(tk.END, entry)
 
+        # Speichere in CSV
         with open(FILE_NAME, 'a') as file:
-            file.write(f"{date_value},{desc_value},{netto_value},{mwst_value},{brutto_value}\n")
+            file.write(f"{date_value},{desc_value},{category_value},{zahlung_value},{netto_value},{mwst_value},{mwst_satz_value},{brutto_value}\n")
 
+        # Leere die Eingabefelder
         desc_entry.delete(0, tk.END)
+        category_entry.delete(0, tk.END)
+        zahlung_entry.delete(0, tk.END)
         netto_entry.delete(0, tk.END)
         mwst_entry.delete(0, tk.END)
+        mwst_satz_entry.delete(0, tk.END)
         brutto_entry.delete(0, tk.END)
 
         update_total(listbox, total_label)
@@ -112,7 +118,8 @@ def print_to_pdf(listbox, start_date, end_date):
         create_pdf(entries_in_range, total_before_period, total_end_balance)
     else:
         print("Keine Einträge im angegebenen Zeitraum gefunden.")
-
+        create_pdf([], total_before_period, total_end_balance)
+        
 # Funktion zum Erstellen einer PDF-Datei mit einer Tabelle
 def get_next_number():
     num_file = "next_number.txt"
@@ -135,14 +142,14 @@ def get_next_number():
 def create_pdf(entries, start_balance, end_balance):
     pdf_number = get_next_number()
     pdf_file = f"Kassenbuch_{pdf_number}.pdf"
-    doc = SimpleDocTemplate(pdf_file, pagesize=A4)
+    doc = SimpleDocTemplate(pdf_file, pagesize=landscape(A4))
     
     styles = getSampleStyleSheet()
 
     # Tabellenüberschriften
-    data = [["Datum", "Beschreibung", "Netto", "MwSt.", "Brutto"]]
+    data = [["Datum", "Beschreibung", "Kategorie", "Zahlung durch", "Netto", "MwSt.", "MwSt.-Satz", "Brutto"]]
 
-    # Einträge in der Tabelle
+    # Einträge in der Tabelle (MwSt.-Satz ist eine eigene Spalte)
     for entry in entries:
         data.append(entry.split(","))
 
@@ -192,6 +199,18 @@ def create_gui():
     desc_entry = tk.Entry(root)
     desc_entry.pack()
 
+    category_label = tk.Label(root, text="Kategorie:")
+    category_label.pack()
+
+    category_entry = tk.Entry(root)
+    category_entry.pack()
+
+    zahlung_label = tk.Label(root, text="Zahlung durch:")
+    zahlung_label.pack()
+
+    zahlung_entry = tk.Entry(root)
+    zahlung_entry.pack()
+
     netto_label = tk.Label(root, text="Netto Betrag:")
     netto_label.pack()
 
@@ -204,16 +223,22 @@ def create_gui():
     mwst_entry = tk.Entry(root)
     mwst_entry.pack()
 
+    mwst_satz_label = tk.Label(root, text="MwSt.-Satz (%):")
+    mwst_satz_label.pack()
+
+    mwst_satz_entry = tk.Entry(root)
+    mwst_satz_entry.pack()
+
     brutto_label = tk.Label(root, text="Brutto Betrag:")
     brutto_label.pack()
 
     brutto_entry = tk.Entry(root)
     brutto_entry.pack()
 
-    add_button = tk.Button(root, text="Hinzufügen", command=lambda: add_entry(date_entry, desc_entry, netto_entry, mwst_entry, brutto_entry, listbox, total_label))
+    add_button = tk.Button(root, text="Hinzufügen", command=lambda: add_entry(date_entry, desc_entry, category_entry, zahlung_entry, netto_entry, mwst_entry, mwst_satz_entry, brutto_entry, listbox, total_label))
     add_button.pack()
 
-    listbox = tk.Listbox(root, width=80)
+    listbox = tk.Listbox(root, width=100)
     listbox.pack()
 
     delete_button = tk.Button(root, text="Löschen", command=lambda: delete_entry(listbox, total_label))
@@ -245,4 +270,3 @@ def create_gui():
 
 # Aufruf der Funktion
 create_gui()
-
