@@ -5,8 +5,9 @@ import os
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
-from reportlab.lib.styles import getSampleStyleSheet 
+from reportlab.lib.styles import getSampleStyleSheet
 from datetime import datetime
+from difflib import get_close_matches
 
 # Name der CSV-Datei, in der die Einträge gespeichert werden
 FILE_NAME = "kassenbuch.csv"
@@ -86,62 +87,65 @@ def update_total(listbox, total_label):
             continue
     total_label.config(text=f"Kassenbestand: {total:.2f} €")
 
-# Funktion zum Filtern von Einträgen nach Zeitraum und Drucken in PDF
-def print_to_pdf(listbox, start_date, end_date):
-    entries_in_range = []
-    
-    # Datumsformat "%d.%m.%Y" verwenden
-    start_date_dt = datetime.strptime(start_date.get(), "%d.%m.%Y")
-    end_date_dt = datetime.strptime(end_date.get(), "%d.%m.%Y")
-    
-    total_before_period = 0.0  # Anfangsbestand
-    total_in_period = 0.0      # Summe im ausgewählten Zeitraum
+# Suchfunktion für Beschreibung, Kategorie oder Zahlung durch (mit 80% Übereinstimmung)
+def search_entries(listbox, search_term, search_type):
+    matching_entries = []
+    threshold = 0.8  # Setze den Schwellenwert für die Übereinstimmung auf 80%
 
     for entry in listbox.get(0, tk.END):
-        date_str = entry.split(",")[0].strip()
-        entry_date = datetime.strptime(date_str, "%d.%m.%Y")
-        brutto_value = float(entry.split(",")[-1].strip())
-
-        # Berechne Anfangsbestand (Einträge vor dem Startdatum)
-        if entry_date < start_date_dt:
-            total_before_period += brutto_value
-
-        # Berechne Einträge im ausgewählten Zeitraum
-        if start_date_dt <= entry_date <= end_date_dt:
-            entries_in_range.append(entry)
-            total_in_period += brutto_value
-
-    # Endbestand berechnen
-    total_end_balance = total_before_period + total_in_period
-
-    if entries_in_range:
-        create_pdf(entries_in_range, total_before_period, total_end_balance)
-    else:
-        print("Keine Einträge im angegebenen Zeitraum gefunden.")
-        create_pdf([], total_before_period, total_end_balance)
+        fields = entry.split(", ")
         
-# Funktion zum Erstellen einer PDF-Datei mit einer Tabelle
-def get_next_number():
-    num_file = "next_number.txt"
-    
-    if not os.path.exists(num_file):
-        with open(num_file, 'w') as file:
-            file.write('1')
-        return 1
-    
-    with open(num_file, 'r') as file:
-        num = int(file.read().strip())
-    
-    next_num = num + 1
-    
-    with open(num_file, 'w') as file:
-        file.write(str(next_num))
-    
-    return num
+        # Stelle sicher, dass genügend Felder vorhanden sind
+        if len(fields) >= 4:
+            if search_type == "Beschreibung":
+                match = get_close_matches(search_term.lower(), [fields[1].lower()], n=1, cutoff=threshold)
+                if match:
+                    matching_entries.append(entry)
+                    
+            elif search_type == "Kategorie":
+                match = get_close_matches(search_term.lower(), [fields[2].lower()], n=1, cutoff=threshold)
+                if match:
+                    matching_entries.append(entry)
+                    
+            elif search_type == "Zahlung durch":
+                match = get_close_matches(search_term.lower(), [fields[3].lower()], n=1, cutoff=threshold)
+                if match:
+                    matching_entries.append(entry)
+        else:
+            print(f"Ungültige Zeile: {entry}")  # Zum Debuggen
 
+    return matching_entries
+
+# Funktion zum Berechnen des End- und Anfangsbestands aus den Suchergebnissen
+def calculate_balances(entries):
+    start_balance = 0.0  # Anfangsbestand
+    end_balance = 0.0    # Endbestand
+
+    for entry in entries:
+        brutto_value = entry.split(",")[-1].strip()
+        try:
+            end_balance += float(brutto_value)
+        except ValueError:
+            continue
+    
+    return start_balance, end_balance
+
+# Funktion zum Erstellen einer PDF mit Suchergebnissen
+def search_and_generate_pdf(listbox, search_term, search_type):
+    matching_entries = search_entries(listbox, search_term, search_type)
+    
+    if matching_entries:
+        # Berechne Anfangs- und Endbestand basierend auf den Suchergebnissen
+        start_balance, end_balance = calculate_balances(matching_entries)
+        create_pdf(matching_entries, start_balance, end_balance)
+    else:
+        print("Keine Übereinstimmungen gefunden.")
+
+# Funktion zum Erstellen einer PDF-Datei mit einer Tabelle
 def create_pdf(entries, start_balance, end_balance):
-    pdf_number = get_next_number()
-    pdf_file = f"Kassenbuch_{pdf_number}.pdf"
+    pdf_number = get_next_number()  # Hol die nächste PDF-Nummer
+    pdf_file = f"Kassenbuch_Suche_{pdf_number}.pdf"
+    
     doc = SimpleDocTemplate(pdf_file, pagesize=landscape(A4))
     
     styles = getSampleStyleSheet()
@@ -151,7 +155,7 @@ def create_pdf(entries, start_balance, end_balance):
 
     # Einträge in der Tabelle (MwSt.-Satz ist eine eigene Spalte)
     for entry in entries:
-        data.append(entry.split(","))
+        data.append(entry.split(", "))
 
     # Tabelle erstellen
     table = Table(data)
@@ -179,65 +183,82 @@ def create_pdf(entries, start_balance, end_balance):
 
     # PDF speichern
     doc.build(elements)
-    print("PDF erfolgreich erstellt!")
+    print(f"PDF erfolgreich erstellt: {pdf_file}")
+
+# Funktion zum Erstellen der fortlaufenden Nummer für PDFs
+def get_next_number():
+    num_file = "next_number.txt"
+    
+    # Erstelle die Datei, falls sie nicht existiert
+    if not os.path.exists(num_file):
+        with open(num_file, 'w') as file:
+            file.write('1')  # Starte bei Nummer 1
+        return 1
+    
+    # Lese die Datei und prüfe auf leere oder ungültige Inhalte
+    with open(num_file, 'r') as file:
+        content = file.read().strip()
+        if content == '' or not content.isdigit():
+            next_num = 1  # Wenn die Datei leer ist oder ungültige Daten enthält, auf 1 setzen
+        else:
+            next_num = int(content) + 1  # Nummer inkrementieren
+    
+    # Schreibe die nächste Nummer zurück in die Datei
+    with open(num_file, 'w') as file:
+        file.write(str(next_num))
+    
+    return next_num
 
 # Funktion zum Erstellen der GUI
 def create_gui():
     root = tk.Tk()
     root.title("Kassenbuch")
 
+    # Eingabefelder
     date_label = tk.Label(root, text="Datum:")
     date_label.pack()
-
-    # DateEntry für die Datumsauswahl mit deutschem Datumsformat
     date_entry = DateEntry(root, width=12, background='darkblue', foreground='white', borderwidth=2, date_pattern='dd.MM.yyyy')
     date_entry.pack()
 
     desc_label = tk.Label(root, text="Beschreibung:")
     desc_label.pack()
-
     desc_entry = tk.Entry(root)
     desc_entry.pack()
 
     category_label = tk.Label(root, text="Kategorie:")
     category_label.pack()
-
     category_entry = tk.Entry(root)
     category_entry.pack()
 
     zahlung_label = tk.Label(root, text="Zahlung durch:")
     zahlung_label.pack()
-
     zahlung_entry = tk.Entry(root)
     zahlung_entry.pack()
 
     netto_label = tk.Label(root, text="Netto Betrag:")
     netto_label.pack()
-
     netto_entry = tk.Entry(root)
     netto_entry.pack()
 
     mwst_label = tk.Label(root, text="MwSt.:")
     mwst_label.pack()
-
     mwst_entry = tk.Entry(root)
     mwst_entry.pack()
 
     mwst_satz_label = tk.Label(root, text="MwSt.-Satz (%):")
     mwst_satz_label.pack()
-
     mwst_satz_entry = tk.Entry(root)
     mwst_satz_entry.pack()
 
     brutto_label = tk.Label(root, text="Brutto Betrag:")
     brutto_label.pack()
-
     brutto_entry = tk.Entry(root)
     brutto_entry.pack()
 
     add_button = tk.Button(root, text="Hinzufügen", command=lambda: add_entry(date_entry, desc_entry, category_entry, zahlung_entry, netto_entry, mwst_entry, mwst_satz_entry, brutto_entry, listbox, total_label))
     add_button.pack()
 
+    # Listbox für Einträge
     listbox = tk.Listbox(root, width=100)
     listbox.pack()
 
@@ -264,6 +285,23 @@ def create_gui():
     print_button = tk.Button(root, text="Drucken als PDF", command=lambda: print_to_pdf(listbox, start_date_entry, end_date_entry))
     print_button.pack(pady=10)
 
+    # Suchfunktion
+    search_label = tk.Label(root, text="Suche nach:")
+    search_label.pack()
+
+    search_entry = tk.Entry(root)
+    search_entry.pack()
+
+    search_type_label = tk.Label(root, text="Suchfeld auswählen:")
+    search_type_label.pack()
+
+    search_type = ttk.Combobox(root, values=["Beschreibung", "Kategorie", "Zahlung durch"])
+    search_type.pack()
+
+    search_button = tk.Button(root, text="Suche und PDF", command=lambda: search_and_generate_pdf(listbox, search_entry.get(), search_type.get()))
+    search_button.pack(pady=10)
+
+    # Lade die vorhandenen Einträge
     load_entries(listbox, total_label)
 
     root.mainloop()

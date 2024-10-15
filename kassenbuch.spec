@@ -33,4 +33,3 @@ exe = EXE(pyz,
           console=False,
           cipher=block_cipher,
           noarchive=False)
-
